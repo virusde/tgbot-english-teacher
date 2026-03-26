@@ -1,13 +1,17 @@
-$portablePython = Join-Path $PSScriptRoot "tools\python312\python.exe"
+$projectRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
+$portablePython = Join-Path $projectRoot "tools\python312\python.exe"
+$mainFile = Join-Path $projectRoot "main.py"
 
-if (Test-Path $portablePython) {
-    & $portablePython (Join-Path $PSScriptRoot "main.py")
+Set-Location -LiteralPath $projectRoot
+
+if (Test-Path -LiteralPath $portablePython) {
+    & $portablePython $mainFile
     exit $LASTEXITCODE
 }
 
 $systemPython = Get-Command python -ErrorAction SilentlyContinue
 if ($systemPython) {
-    & $systemPython.Source (Join-Path $PSScriptRoot "main.py")
+    & $systemPython.Source $mainFile
     exit $LASTEXITCODE
 }
 

@@ -49,6 +49,12 @@ python main.py
 
 Скрипт `run_bot.ps1` сначала попробует локальный portable Python в `tools/python312`, если он есть, а иначе использует системный `python`.
 
+Если PowerShell блокирует запуск `.ps1` из-за Execution Policy, используйте:
+
+```cmd
+run_bot.cmd
+```
+
 или явно через локальный интерпретатор проекта:
 
 ```powershell
@@ -63,6 +69,11 @@ python main.py
 .\tools\python312\python.exe -m unittest discover -s tests -v
 ```
 
+<<<<<<< codex/rules-command
+=======
+Тесты покрывают встроенные уроки, хранение прогресса и чистую внутреннюю логику без реальных запросов к Telegram или OpenAI.
+
+>>>>>>> main
 ## Команды
 
 - `/start` — приветствие и меню
