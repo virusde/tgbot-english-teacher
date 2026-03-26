@@ -60,6 +60,16 @@ run_bot.cmd
 .\tools\python312\python.exe .\main.py
 ```
 
+## Тесты
+
+Для быстрого регрессионного прогона используйте:
+
+```powershell
+.\tools\python312\python.exe -m unittest discover -s tests -v
+```
+
+Тесты покрывают встроенные уроки, хранение прогресса и чистую внутреннюю логику без реальных запросов к Telegram или OpenAI.
+
 ## Команды
 
 - `/start` — приветствие и меню
