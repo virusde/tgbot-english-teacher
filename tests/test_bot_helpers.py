@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import shutil
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from tests.support import cleanup_temp_root, load_bot_module, make_temp_dir
@@ -44,6 +45,11 @@ class BotHelperTests(unittest.TestCase):
 
         self.assertIn("/rules", help_text)
         self.assertIn("разобрать свою фразу", help_text)
+
+    def test_topic_ready_menu_contains_start_button(self) -> None:
+        labels = [[button.text for button in row] for row in self.bot.topic_ready_menu().keyboard]
+
+        self.assertEqual(labels[0], [self.bot.START_TOPIC_LESSON_TEXT])
 
     def test_make_static_topic_copies_lesson_data(self) -> None:
         lesson = {
@@ -205,6 +211,54 @@ class BotHelperTests(unittest.TestCase):
         self.assertEqual(topic["id"], "static-1")
         self.assertEqual(topic["source"], "static")
         self.assertEqual(user_state["lesson_index"], 1)
+
+    def test_lesson_uses_saved_requested_topic_without_reasking(self) -> None:
+        self.bot.storage.ensure_user(101, "Egor")
+        user_state = self.bot.storage.get_user(101)
+        user_state["requested_topic"] = "Насекомые"
+        self.bot.storage.update_user(101, user_state)
+
+        calls: list[tuple[str, str | None]] = []
+
+        async def fake_start_next_lesson(update, state) -> None:
+            calls.append(("start", state.get("requested_topic")))
+
+        async def fake_ask_lesson_topic(update, state) -> None:
+            calls.append(("ask", state.get("requested_topic")))
+
+        update = SimpleNamespace(effective_user=SimpleNamespace(id=101, first_name="Egor"))
+        context = SimpleNamespace(args=[])
+
+        with patch.object(self.bot, "start_next_lesson", fake_start_next_lesson):
+            with patch.object(self.bot, "ask_lesson_topic", fake_ask_lesson_topic):
+                asyncio.run(self.bot.lesson(update, context))
+
+        self.assertEqual(calls, [("start", "Насекомые")])
+
+    def test_start_topic_button_starts_saved_topic(self) -> None:
+        self.bot.storage.ensure_user(202, "Egor")
+        user_state = self.bot.storage.get_user(202)
+        user_state["requested_topic"] = "Насекомые"
+        self.bot.storage.update_user(202, user_state)
+
+        calls: list[tuple[str, str | None]] = []
+
+        async def fake_start_next_lesson(update, state) -> None:
+            calls.append(("start", state.get("requested_topic")))
+
+        async def fake_reply_text(*args, **kwargs) -> None:
+            return None
+
+        update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=202, first_name="Egor"),
+            message=SimpleNamespace(text=self.bot.START_TOPIC_LESSON_TEXT, reply_text=fake_reply_text),
+        )
+        context = SimpleNamespace()
+
+        with patch.object(self.bot, "start_next_lesson", fake_start_next_lesson):
+            asyncio.run(self.bot.handle_text(update, context))
+
+        self.assertEqual(calls, [("start", "Насекомые")])
 
 
 if __name__ == "__main__":

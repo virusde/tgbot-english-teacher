@@ -38,6 +38,7 @@ ai_tutor = OpenAITutor()
 
 PRACTICE_AGAIN_TEXT = "🔁 Еще практика"
 NEXT_LESSON_TEXT = "➡️ Следующий урок"
+START_TOPIC_LESSON_TEXT = "▶️ Начать урок"
 AUTO_TOPIC_TEXT = "🎲 Выбери тему сам"
 CANCEL_TOPIC_TEXT = "❌ Отмена"
 
@@ -110,6 +111,17 @@ def parse_lesson_args(context: ContextTypes.DEFAULT_TYPE) -> str:
 
 def free_text_markup() -> ReplyKeyboardRemove:
     return ReplyKeyboardRemove()
+
+
+def topic_ready_menu() -> ReplyKeyboardMarkup:
+    return ReplyKeyboardMarkup(
+        [
+            [START_TOPIC_LESSON_TEXT],
+            ["/lesson", "/rules"],
+            ["/progress", "/help"],
+        ],
+        resize_keyboard=True,
+    )
 
 
 def make_static_topic(lesson: dict[str, Any]) -> dict[str, Any]:
@@ -652,6 +664,9 @@ async def lesson(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if raw_topic:
         await start_lesson_with_requested_topic(update, user_state, raw_topic)
         return
+    if user_state.get("requested_topic"):
+        await start_next_lesson(update, user_state)
+        return
     await ask_lesson_topic(update, user_state)
 
 
@@ -687,8 +702,9 @@ async def topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user_state["awaiting_rules_text"] = False
     storage.update_user(user_id, user_state)
     await update.message.reply_text(
-        f"📝 <b>Тему запомнил</b>\nСледующий урок будет про <b>{esc(raw_topic)}</b>.",
-        reply_markup=MENU,
+        f"📝 <b>Тему запомнил</b>\nСледующий урок будет про <b>{esc(raw_topic)}</b>.\n"
+        f"Нажми <b>{esc(START_TOPIC_LESSON_TEXT)}</b>, чтобы начать сразу.",
+        reply_markup=topic_ready_menu(),
     )
 
 
@@ -886,9 +902,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             storage.update_user(user_id, user_state)
             await update.message.reply_text(
                 f"📝 <b>Отлично</b>\nСледующий урок подготовлю про <b>{esc(topic_request)}</b>.\n"
-                "Когда будешь готов, нажми <code>/lesson</code>.",
-                reply_markup=MENU,
+                f"Можешь нажать <b>{esc(START_TOPIC_LESSON_TEXT)}</b> и начать сразу.",
+                reply_markup=topic_ready_menu(),
             )
+            return
+
+        if text == START_TOPIC_LESSON_TEXT and user_state.get("requested_topic"):
+            await start_next_lesson(update, user_state)
             return
 
         if text == PRACTICE_AGAIN_TEXT:
