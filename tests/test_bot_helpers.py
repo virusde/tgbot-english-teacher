@@ -40,6 +40,11 @@ class BotHelperTests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(self.bot.extract_topic_request(text), expected)
 
+    def test_extract_bot_mention_query_removes_bot_name(self) -> None:
+        query = self.bot.extract_bot_mention_query("@teacherbot объясни Present Simple", "teacherbot")
+
+        self.assertEqual(query, "объясни Present Simple")
+
     def test_format_help_mentions_rules_command(self) -> None:
         help_text = self.bot.format_help()
 
@@ -288,6 +293,36 @@ class BotHelperTests(unittest.TestCase):
             asyncio.run(self.bot.handle_text(update, context))
 
         self.assertEqual(calls, [("ask", True)])
+
+    def test_bot_mention_routes_message_to_openai_answer(self) -> None:
+        self.bot.storage.ensure_user(404, "Egor")
+        replies: list[str] = []
+
+        class FakeTutor:
+            enabled = True
+            available = True
+
+            async def answer_mention(self, *, question, user_state):
+                return f"AI:{question}:{user_state.get('first_name')}"
+
+            def get_status_notice(self):
+                return None
+
+        async def fake_reply_text(text, **kwargs) -> None:
+            replies.append(text)
+
+        update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=404, first_name="Egor"),
+            message=SimpleNamespace(text="@teacherbot объясни Present Perfect", reply_text=fake_reply_text),
+        )
+        context = SimpleNamespace(bot=SimpleNamespace(username="teacherbot"))
+
+        with patch.object(self.bot, "ai_tutor", FakeTutor()):
+            asyncio.run(self.bot.handle_text(update, context))
+
+        self.assertEqual(len(replies), 1)
+        self.assertIn("Ответ через OpenAI", replies[0])
+        self.assertIn("AI:объясни Present Perfect:Egor", replies[0])
 
 
 if __name__ == "__main__":

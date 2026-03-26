@@ -114,6 +114,21 @@ def extract_topic_request(text: str) -> str | None:
     return None
 
 
+def extract_bot_mention_query(text: str, bot_username: str | None) -> str | None:
+    if not bot_username:
+        return None
+
+    mention = f"@{bot_username}"
+    pattern = rf"(?i){re.escape(mention)}"
+    if not re.search(pattern, text):
+        return None
+
+    cleaned = re.sub(pattern, " ", text)
+    cleaned = cleaned.strip(" \t\n\r,.:;!-")
+    cleaned = " ".join(cleaned.split())
+    return cleaned or None
+
+
 def parse_lesson_args(context: ContextTypes.DEFAULT_TYPE) -> str:
     return " ".join(context.args).strip()
 
@@ -206,7 +221,8 @@ def format_help() -> str:
         "Сначала урок, потом упражнения по теме, затем разбор ошибок и выбор следующего шага.\n\n"
         "💬 <b>Можно просто написать</b>\n"
         "Например: <i>Хочу урок про путешествия</i>.\n"
-        "А через <code>/rules</code> можно прислать свой вопрос или предложение для разбора."
+        "А через <code>/rules</code> можно прислать свой вопрос или предложение для разбора.\n"
+        "Если написать боту через <code>@имя_бота</code> в чате, он ответит через OpenAI."
     )
 
 
@@ -252,6 +268,13 @@ def format_rules_review(review: dict[str, Any]) -> str:
         ]
     )
     return "\n".join(lines)
+
+
+def format_mention_reply(answer: str) -> str:
+    return (
+        "🤖 <b>Ответ через OpenAI</b>\n\n"
+        f"{esc(answer)}"
+    )
 
 
 def build_lesson_session(topic: dict[str, Any]) -> dict[str, Any]:
@@ -610,6 +633,12 @@ async def analyze_rules_text(text: str) -> dict[str, Any]:
     return analyze_text_locally(text)
 
 
+async def answer_bot_mention(user_state: dict[str, Any], text: str) -> str | None:
+    if not ai_tutor.enabled:
+        return None
+    return await ai_tutor.answer_mention(question=text, user_state=user_state)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     storage.ensure_user(user.id, user.first_name)
@@ -634,7 +663,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "Урок → упражнения по теме → разбор ошибок → выбор следующего шага.\n\n"
             "✨ Напиши <code>/lesson</code>, и я спрошу тему.\n"
             "Или сразу: <code>/lesson путешествия</code>.\n"
-            "Если хочешь разобрать свою фразу, используй <code>/rules</code>."
+            "Если хочешь разобрать свою фразу, используй <code>/rules</code>.\n"
+            "А в чате можно обратиться ко мне через <code>@имя_бота</code> и получить ответ от OpenAI."
         ),
         reply_markup=MENU,
     )
@@ -853,6 +883,25 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     user_state = storage.get_user(user_id)
     text = update.message.text.strip()
     session = user_state.get("active_session")
+    bot_username = getattr(getattr(context, "bot", None), "username", None)
+    mention_query = extract_bot_mention_query(text, bot_username)
+
+    if mention_query is not None:
+        answer = await answer_bot_mention(user_state, mention_query)
+        if answer:
+            await update.message.reply_text(format_mention_reply(answer))
+            return
+
+        notice = ai_tutor.get_status_notice()
+        if ai_tutor.enabled:
+            message = notice or "OpenAI сейчас временно недоступен, поэтому не могу ответить на обращение через @."
+        else:
+            message = (
+                "📚 <b>Режим ответов по @ пока недоступен</b>\n"
+                "Добавь <code>OPENAI_API_KEY</code> в <code>.env</code>, и я смогу отвечать на обращения через @."
+            )
+        await update.message.reply_text(message)
+        return
 
     if session and text in control_button_texts():
         await update.message.reply_text(

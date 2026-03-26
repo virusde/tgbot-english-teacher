@@ -49,6 +49,7 @@ TOPIC_SEED_POOL = [
 class OpenAITutor:
     def __init__(self) -> None:
         self.api_key = os.getenv("OPENAI_API_KEY")
+        self.chat_model = os.getenv("OPENAI_CHAT_MODEL") or os.getenv("OPENAI_MODEL", "gpt-5-mini")
         self.lesson_model = os.getenv("OPENAI_LESSON_MODEL") or os.getenv("OPENAI_MODEL", "gpt-5-mini")
         self.review_model = os.getenv("OPENAI_REVIEW_MODEL", "gpt-5-nano")
         self.timeout = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "90"))
@@ -318,6 +319,42 @@ class OpenAITutor:
         review["source"] = "openai"
         return review
 
+    async def answer_mention(
+        self,
+        *,
+        question: str,
+        user_state: dict[str, Any],
+    ) -> str | None:
+        if not self.available:
+            return None
+
+        payload = {
+            "student_name": user_state.get("first_name") or "student",
+            "current_topic": (user_state.get("current_topic") or {}).get("title"),
+            "requested_topic": user_state.get("requested_topic"),
+            "question": question,
+            "requirements": [
+                "Answer in Russian by default unless the user clearly asks for English.",
+                "Be concise, practical, and helpful for an English learner.",
+                "When useful, include short English examples.",
+                "If the question is about grammar or wording, explain the rule simply.",
+                "Do not mention internal schemas or API details.",
+            ],
+        }
+
+        try:
+            return await self._request_text(
+                model=self.chat_model,
+                system_prompt=(
+                    "You are a helpful English tutor inside a Telegram bot. "
+                    "Answer short learner questions naturally and clearly."
+                ),
+                user_payload=payload,
+            )
+        except Exception as exc:
+            logger.warning("OpenAI mention answer failed: %s", self._format_exception(exc))
+            return None
+
     async def _request_json(
         self,
         *,
@@ -374,6 +411,53 @@ class OpenAITutor:
         if not text:
             raise RuntimeError("Empty response from OpenAI")
         return json.loads(text)
+
+    async def _request_text(
+        self,
+        *,
+        model: str,
+        system_prompt: str,
+        user_payload: dict[str, Any],
+    ) -> str:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            for attempt in range(2):
+                try:
+                    response = await client.post(
+                        RESPONSES_URL,
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            "model": model,
+                            "instructions": system_prompt,
+                            "input": json.dumps(user_payload, ensure_ascii=False),
+                        },
+                    )
+                    response.raise_for_status()
+                    break
+                except httpx.HTTPStatusError as exc:
+                    self._handle_http_error(exc)
+                    raise
+                except httpx.TimeoutException as exc:
+                    self.last_error_kind = "timeout"
+                    self.last_error_message = self._format_exception(exc)
+                    if attempt == 0:
+                        await asyncio.sleep(1)
+                        continue
+                    self.cooldown_until = time.time() + 30
+                    raise
+                except httpx.TransportError as exc:
+                    self.last_error_kind = "transport_error"
+                    self.last_error_message = self._format_exception(exc)
+                    self.cooldown_until = time.time() + 30
+                    raise
+
+        response_json = response.json()
+        text = self._extract_output_text(response_json)
+        if not text:
+            raise RuntimeError("Empty response from OpenAI")
+        return text
 
     def _extract_output_text(self, response_json: dict[str, Any]) -> str:
         texts: list[str] = []
