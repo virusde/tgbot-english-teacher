@@ -69,11 +69,7 @@ run_bot.cmd
 .\tools\python312\python.exe -m unittest discover -s tests -v
 ```
 
-<<<<<<< codex/rules-command
-=======
 Тесты покрывают встроенные уроки, хранение прогресса и чистую внутреннюю логику без реальных запросов к Telegram или OpenAI.
-
->>>>>>> main
 ## Команды
 
 - `/start` — приветствие и меню
