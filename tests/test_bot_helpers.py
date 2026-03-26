@@ -46,6 +46,14 @@ class BotHelperTests(unittest.TestCase):
         self.assertIn("/rules", help_text)
         self.assertIn("разобрать свою фразу", help_text)
 
+    def test_menu_contains_emoji_navigation_buttons(self) -> None:
+        labels = [[button.text for button in row] for row in self.bot.MENU.keyboard]
+
+        self.assertEqual(labels[0], [self.bot.LESSON_BUTTON_TEXT, self.bot.TOPIC_BUTTON_TEXT])
+        self.assertEqual(labels[1], [self.bot.WORDS_BUTTON_TEXT, self.bot.QUIZ_BUTTON_TEXT])
+        self.assertEqual(labels[2], [self.bot.REPEAT_BUTTON_TEXT, self.bot.PROGRESS_BUTTON_TEXT])
+        self.assertEqual(labels[3], [self.bot.RULES_BUTTON_TEXT, self.bot.HELP_BUTTON_TEXT])
+
     def test_topic_ready_menu_contains_start_button(self) -> None:
         labels = [[button.text for button in row] for row in self.bot.topic_ready_menu().keyboard]
 
@@ -259,6 +267,27 @@ class BotHelperTests(unittest.TestCase):
             asyncio.run(self.bot.handle_text(update, context))
 
         self.assertEqual(calls, [("start", "Насекомые")])
+
+    def test_topic_button_opens_topic_prompt(self) -> None:
+        self.bot.storage.ensure_user(303, "Egor")
+        calls: list[tuple[str, bool]] = []
+
+        async def fake_ask_lesson_topic(update, state) -> None:
+            calls.append(("ask", bool(state)))
+
+        async def fake_reply_text(*args, **kwargs) -> None:
+            return None
+
+        update = SimpleNamespace(
+            effective_user=SimpleNamespace(id=303, first_name="Egor"),
+            message=SimpleNamespace(text=self.bot.TOPIC_BUTTON_TEXT, reply_text=fake_reply_text),
+        )
+        context = SimpleNamespace()
+
+        with patch.object(self.bot, "ask_lesson_topic", fake_ask_lesson_topic):
+            asyncio.run(self.bot.handle_text(update, context))
+
+        self.assertEqual(calls, [("ask", True)])
 
 
 if __name__ == "__main__":

@@ -5,6 +5,7 @@ import logging
 import os
 import random
 import re
+from types import SimpleNamespace
 from typing import Any
 
 from dotenv import load_dotenv
@@ -36,6 +37,14 @@ logging.getLogger("httpcore").setLevel(logging.WARNING)
 storage = Storage()
 ai_tutor = OpenAITutor()
 
+LESSON_BUTTON_TEXT = "📘 Урок"
+TOPIC_BUTTON_TEXT = "🧭 Тема"
+WORDS_BUTTON_TEXT = "🧩 Слова"
+QUIZ_BUTTON_TEXT = "🎯 Квиз"
+REPEAT_BUTTON_TEXT = "🔁 Повтор"
+PROGRESS_BUTTON_TEXT = "📊 Прогресс"
+RULES_BUTTON_TEXT = "🧠 Разбор"
+HELP_BUTTON_TEXT = "❓ Помощь"
 PRACTICE_AGAIN_TEXT = "🔁 Еще практика"
 NEXT_LESSON_TEXT = "➡️ Следующий урок"
 START_TOPIC_LESSON_TEXT = "▶️ Начать урок"
@@ -44,10 +53,10 @@ CANCEL_TOPIC_TEXT = "❌ Отмена"
 
 MENU = ReplyKeyboardMarkup(
     [
-        ["/lesson", "/words"],
-        ["/quiz", "/repeat"],
-        ["/progress", "/rules"],
-        ["/help"],
+        [LESSON_BUTTON_TEXT, TOPIC_BUTTON_TEXT],
+        [WORDS_BUTTON_TEXT, QUIZ_BUTTON_TEXT],
+        [REPEAT_BUTTON_TEXT, PROGRESS_BUTTON_TEXT],
+        [RULES_BUTTON_TEXT, HELP_BUTTON_TEXT],
     ],
     resize_keyboard=True,
 )
@@ -55,8 +64,8 @@ MENU = ReplyKeyboardMarkup(
 ACTION_MENU = ReplyKeyboardMarkup(
     [
         [PRACTICE_AGAIN_TEXT, NEXT_LESSON_TEXT],
-        ["/progress", "/rules"],
-        ["/help"],
+        [PROGRESS_BUTTON_TEXT, RULES_BUTTON_TEXT],
+        [HELP_BUTTON_TEXT],
     ],
     resize_keyboard=True,
 )
@@ -117,11 +126,27 @@ def topic_ready_menu() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         [
             [START_TOPIC_LESSON_TEXT],
-            ["/lesson", "/rules"],
-            ["/progress", "/help"],
+            [TOPIC_BUTTON_TEXT, RULES_BUTTON_TEXT],
+            [PROGRESS_BUTTON_TEXT, HELP_BUTTON_TEXT],
         ],
         resize_keyboard=True,
     )
+
+
+def control_button_texts() -> set[str]:
+    return {
+        LESSON_BUTTON_TEXT,
+        TOPIC_BUTTON_TEXT,
+        WORDS_BUTTON_TEXT,
+        QUIZ_BUTTON_TEXT,
+        REPEAT_BUTTON_TEXT,
+        PROGRESS_BUTTON_TEXT,
+        RULES_BUTTON_TEXT,
+        HELP_BUTTON_TEXT,
+        PRACTICE_AGAIN_TEXT,
+        NEXT_LESSON_TEXT,
+        START_TOPIC_LESSON_TEXT,
+    }
 
 
 def make_static_topic(lesson: dict[str, Any]) -> dict[str, Any]:
@@ -175,6 +200,8 @@ def format_help() -> str:
         "• <code>/rules She don't like coffee</code> — сразу получить разбор\n"
         "• <code>/progress</code> — ваш прогресс\n"
         "• <code>/help</code> — помощь\n\n"
+        "⌨️ <b>Кнопки на клавиатуре</b>\n"
+        "Кнопки с эмодзи делают то же самое, что и команды: урок, тема, слова, квиз, повтор, прогресс, разбор и помощь.\n\n"
         "🎯 <b>Как проходит обучение</b>\n"
         "Сначала урок, потом упражнения по теме, затем разбор ошибок и выбор следующего шага.\n\n"
         "💬 <b>Можно просто написать</b>\n"
@@ -827,7 +854,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     text = update.message.text.strip()
     session = user_state.get("active_session")
 
-    if session and text in {PRACTICE_AGAIN_TEXT, NEXT_LESSON_TEXT}:
+    if session and text in control_button_texts():
         await update.message.reply_text(
             "⏳ <b>Сначала закончим текущие упражнения</b>\nПотом я предложу, что делать дальше.",
             reply_markup=MENU,
@@ -853,6 +880,33 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             storage.update_user(user_id, user_state)
             review = await analyze_rules_text(text)
             await update.message.reply_text(format_rules_review(review), reply_markup=MENU)
+            return
+
+        empty_context = SimpleNamespace(args=[])
+
+        if text == LESSON_BUTTON_TEXT:
+            await lesson(update, empty_context)
+            return
+        if text == TOPIC_BUTTON_TEXT:
+            await ask_lesson_topic(update, user_state)
+            return
+        if text == WORDS_BUTTON_TEXT:
+            await words(update, empty_context)
+            return
+        if text == QUIZ_BUTTON_TEXT:
+            await quiz(update, empty_context)
+            return
+        if text == REPEAT_BUTTON_TEXT:
+            await repeat(update, empty_context)
+            return
+        if text == PROGRESS_BUTTON_TEXT:
+            await progress(update, empty_context)
+            return
+        if text == RULES_BUTTON_TEXT:
+            await rules_command(update, empty_context)
+            return
+        if text == HELP_BUTTON_TEXT:
+            await help_command(update, empty_context)
             return
 
         if user_state.get("awaiting_lesson_topic"):
