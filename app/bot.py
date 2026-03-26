@@ -8,7 +8,7 @@ import re
 from typing import Any
 
 from dotenv import load_dotenv
-from telegram import ReplyKeyboardMarkup, Update
+from telegram import ReplyKeyboardMarkup, ReplyKeyboardRemove, Update
 from telegram.error import Conflict, NetworkError
 from telegram.ext import (
     Application,
@@ -53,14 +53,6 @@ ACTION_MENU = ReplyKeyboardMarkup(
     [
         [PRACTICE_AGAIN_TEXT, NEXT_LESSON_TEXT],
         ["/progress", "/help"],
-    ],
-    resize_keyboard=True,
-)
-
-TOPIC_MENU = ReplyKeyboardMarkup(
-    [
-        [AUTO_TOPIC_TEXT, CANCEL_TOPIC_TEXT],
-        ["/help"],
     ],
     resize_keyboard=True,
 )
@@ -111,6 +103,10 @@ def extract_topic_request(text: str) -> str | None:
 
 def parse_lesson_args(context: ContextTypes.DEFAULT_TYPE) -> str:
     return " ".join(context.args).strip()
+
+
+def free_text_markup() -> ReplyKeyboardRemove:
+    return ReplyKeyboardRemove()
 
 
 def make_static_topic(lesson: dict[str, Any]) -> dict[str, Any]:
@@ -385,11 +381,11 @@ async def send_topic_with_practice(
     user_state["active_session"] = session
     storage.update_user(update.effective_user.id, user_state)
 
-    await update.message.reply_text(format_topic(topic), reply_markup=MENU)
+    await update.message.reply_text(format_topic(topic), reply_markup=free_text_markup())
     await update.message.reply_text(
         "🔥 <b>Переходим к практике</b>\nСейчас проверим, как ты понял тему.\n\n"
         + format_session_question(session),
-        reply_markup=MENU,
+        reply_markup=free_text_markup(),
     )
 
 
@@ -449,8 +445,11 @@ async def ask_lesson_topic(update: Update, user_state: dict[str, Any]) -> None:
         "• <i>путешествия</i>\n"
         "• <i>собеседование</i>\n"
         "• <i>Технический директор / Chief Technology Officer (CTO)</i>\n\n"
-        "Или нажми <b>🎲 Выбери тему сам</b>, и я сгенерирую ее сам.",
-        reply_markup=TOPIC_MENU,
+        "Если хочешь, чтобы я выбрал тему сам, просто напиши:\n"
+        "<code>выбери тему сам</code>\n\n"
+        "Чтобы отменить, напиши:\n"
+        "<code>отмена</code>",
+        reply_markup=free_text_markup(),
     )
 
 
@@ -568,7 +567,7 @@ async def topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             "🗂 <b>Задай тему урока</b>\n"
             "Например: <code>/topic путешествия</code>\n"
             "Или просто напиши сообщением: <i>Хочу урок про собеседование</i>.",
-            reply_markup=MENU,
+            reply_markup=free_text_markup(),
         )
         return
 
@@ -622,7 +621,7 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
         "🎯 <b>Запускаю общий квиз</b>\nПроверим слова из уже изученных тем.\n\n"
         + format_session_question(session),
-        reply_markup=MENU,
+        reply_markup=free_text_markup(),
     )
 
 
@@ -718,11 +717,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     if not session:
         if user_state.get("awaiting_lesson_topic"):
-            if text == AUTO_TOPIC_TEXT:
+            if normalize(text) in {
+                normalize(AUTO_TOPIC_TEXT),
+                "выбери тему сам",
+                "выбирай сам",
+                "сам выбери тему",
+                "auto",
+                "random",
+            }:
                 user_state["awaiting_lesson_topic"] = False
                 await start_lesson_with_requested_topic(update, user_state, None)
                 return
-            if text == CANCEL_TOPIC_TEXT:
+            if normalize(text) in {
+                normalize(CANCEL_TOPIC_TEXT),
+                "отмена",
+                "cancel",
+            }:
                 user_state["awaiting_lesson_topic"] = False
                 storage.update_user(user_id, user_state)
                 await update.message.reply_text(
@@ -826,7 +836,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     next_prompt = format_session_question(session)
     await update.message.reply_text(
         f"{feedback_line}\n\n{next_prompt}",
-        reply_markup=MENU,
+        reply_markup=free_text_markup(),
     )
 
 
