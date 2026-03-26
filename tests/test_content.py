@@ -6,16 +6,27 @@ from app.content import LESSONS, get_all_words, get_lesson, get_lesson_by_id
 
 
 class ContentTests(unittest.TestCase):
+<<<<<<< codex/rules-command
+    def test_get_lesson_returns_expected_lesson(self) -> None:
+=======
     def test_get_lesson_returns_expected_lesson(self):
+>>>>>>> main
         lesson = get_lesson(0)
 
         self.assertEqual(lesson["id"], 1)
         self.assertEqual(lesson["title"], LESSONS[0]["title"])
 
+<<<<<<< codex/rules-command
+    def test_get_lesson_by_id_returns_none_for_unknown_id(self) -> None:
+        self.assertIsNone(get_lesson_by_id(999))
+
+    def test_get_all_words_flattens_every_lesson_vocabulary(self) -> None:
+=======
     def test_get_lesson_by_id_returns_none_for_unknown_id(self):
         self.assertIsNone(get_lesson_by_id(999))
 
     def test_get_all_words_flattens_every_lesson_vocabulary(self):
+>>>>>>> main
         words = get_all_words()
         expected_words = [item for lesson in LESSONS for item in lesson["vocabulary"]]
 
