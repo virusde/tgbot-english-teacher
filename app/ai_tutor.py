@@ -245,6 +245,79 @@ class OpenAITutor:
         review["accepted_answers"] = accepted_answers
         return review
 
+    async def explain_sentence(self, text: str) -> dict[str, Any] | None:
+        if not self.available:
+            return None
+
+        payload = {
+            "student_text": text,
+            "requirements": [
+                "Detect whether the English sentence or question is natural and grammatically correct.",
+                "If needed, provide one corrected version in English.",
+                "Explain the issues in Russian in a supportive teaching tone.",
+                "Focus on word order, tense, articles, prepositions, auxiliary verbs, and word choice when relevant.",
+                "Return concise practical guidance for a beginner learner.",
+                "If the sentence is already acceptable, keep corrected_text the same and explain what is used correctly.",
+            ],
+        }
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "source": {"type": "string"},
+                "is_correct": {"type": "boolean"},
+                "original_text": {"type": "string"},
+                "corrected_text": {"type": "string"},
+                "summary": {"type": "string"},
+                "issues": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "title": {"type": "string"},
+                            "details": {"type": "string"},
+                            "rule": {"type": "string"},
+                        },
+                        "required": ["title", "details", "rule"],
+                        "additionalProperties": False,
+                    },
+                },
+                "rule_notes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            "required": [
+                "source",
+                "is_correct",
+                "original_text",
+                "corrected_text",
+                "summary",
+                "issues",
+                "rule_notes",
+            ],
+            "additionalProperties": False,
+        }
+
+        try:
+            review = await self._request_json(
+                model=self.review_model,
+                system_prompt=(
+                    "You analyze short English learner sentences for a Telegram tutor bot. "
+                    "Return valid JSON only. All explanations, titles, rules, and summaries must be in Russian. "
+                    "The corrected sentence must be in English."
+                ),
+                user_payload=payload,
+                schema_name="sentence_review",
+                schema=schema,
+            )
+        except Exception as exc:
+            logger.warning("OpenAI sentence review failed: %s", self._format_exception(exc))
+            return None
+
+        review["source"] = "openai"
+        return review
+
     async def _request_json(
         self,
         *,

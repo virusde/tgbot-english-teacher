@@ -22,6 +22,7 @@ class Storage:
             "current_topic": None,
             "requested_topic": None,
             "awaiting_lesson_topic": False,
+            "awaiting_rules_text": False,
             "completed_lessons": [],
             "lesson_history": [],
             "topic_seeds": [],

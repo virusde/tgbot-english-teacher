@@ -21,6 +21,7 @@ from telegram.ext import (
 
 from app.ai_tutor import OpenAITutor
 from app.content import LESSONS, get_all_words, get_lesson
+from app.rules import analyze_text_locally
 from app.storage import Storage
 
 load_dotenv()
@@ -44,7 +45,8 @@ MENU = ReplyKeyboardMarkup(
     [
         ["/lesson", "/words"],
         ["/quiz", "/repeat"],
-        ["/progress", "/help"],
+        ["/progress", "/rules"],
+        ["/help"],
     ],
     resize_keyboard=True,
 )
@@ -52,7 +54,8 @@ MENU = ReplyKeyboardMarkup(
 ACTION_MENU = ReplyKeyboardMarkup(
     [
         [PRACTICE_AGAIN_TEXT, NEXT_LESSON_TEXT],
-        ["/progress", "/help"],
+        ["/progress", "/rules"],
+        ["/help"],
     ],
     resize_keyboard=True,
 )
@@ -143,7 +146,7 @@ def format_topic(topic: dict[str, Any]) -> str:
 def format_help() -> str:
     ai_line = (
         "✅ <b>OpenAI API подключен</b>\n"
-        "Бот может генерировать темы и упражнения через OpenAI.\n\n"
+        "Бот может генерировать темы, упражнения и разбирать твои фразы через OpenAI.\n\n"
         if ai_tutor.enabled
         else "📚 <b>OpenAI API не настроен</b>\nБот использует встроенные уроки. Добавь <code>OPENAI_API_KEY</code> в <code>.env</code>, чтобы включить OpenAI.\n\n"
     )
@@ -156,14 +159,60 @@ def format_help() -> str:
         "• <code>/words</code> — слова текущей темы\n"
         "• <code>/quiz</code> — общий тест по изученным словам\n"
         "• <code>/repeat</code> — слова, которые стоит повторить\n"
+        "• <code>/rules</code> — разобрать свою фразу или вопрос по грамматике\n"
+        "• <code>/rules She don't like coffee</code> — сразу получить разбор\n"
         "• <code>/progress</code> — ваш прогресс\n"
         "• <code>/help</code> — помощь\n\n"
         "🎯 <b>Как проходит обучение</b>\n"
         "Сначала урок, потом упражнения по теме, затем разбор ошибок и выбор следующего шага.\n\n"
         "💬 <b>Можно просто написать</b>\n"
         "Например: <i>Хочу урок про путешествия</i>.\n"
-        "Если ничего не говоришь, тему выбираю сам."
+        "А через <code>/rules</code> можно прислать свой вопрос или предложение для разбора."
     )
+
+
+def format_rules_review(review: dict[str, Any]) -> str:
+    source_line = (
+        "🤖 <b>Разбор через OpenAI</b>"
+        if review.get("source") == "openai"
+        else "📘 <b>Локальный разбор правил</b>"
+    )
+    lines = [
+        source_line,
+        "",
+        "✍️ <b>Твоя фраза</b>",
+        f"<code>{esc(review['original_text'])}</code>",
+        "",
+        "✅ <b>Лучше так</b>",
+        f"<code>{esc(review['corrected_text'])}</code>",
+        "",
+        "🧠 <b>Коротко</b>",
+        esc(review["summary"]),
+    ]
+
+    issues = review.get("issues", [])
+    if issues:
+        lines.extend(["", "🛠 <b>Что поправить</b>"])
+        for index, issue in enumerate(issues, start=1):
+            lines.append(
+                f"\n<b>{index}. {esc(issue['title'])}</b>\n"
+                f"🔎 {esc(issue['details'])}\n"
+                f"📚 Правило: {esc(issue['rule'])}"
+            )
+
+    rule_notes = review.get("rule_notes", [])
+    if rule_notes:
+        lines.extend(["", "📖 <b>Что запомнить</b>"])
+        for note in rule_notes[:2]:
+            lines.append(f"• {esc(note)}")
+
+    lines.extend(
+        [
+            "",
+            "✉️ <i>Можешь прислать следующую фразу через /rules и потренироваться еще.</i>",
+        ]
+    )
+    return "\n".join(lines)
 
 
 def build_lesson_session(topic: dict[str, Any]) -> dict[str, Any]:
@@ -391,6 +440,7 @@ async def send_topic_with_practice(
 
 async def start_next_lesson(update: Update, user_state: dict[str, Any]) -> None:
     user_state["awaiting_lesson_topic"] = False
+    user_state["awaiting_rules_text"] = False
     requested_topic_pending = bool(user_state.get("requested_topic"))
     topic = await generate_next_topic(user_state)
     if not topic:
@@ -438,6 +488,7 @@ async def start_current_lesson_practice(update: Update, user_state: dict[str, An
 
 async def ask_lesson_topic(update: Update, user_state: dict[str, Any]) -> None:
     user_state["awaiting_lesson_topic"] = True
+    user_state["awaiting_rules_text"] = False
     storage.update_user(update.effective_user.id, user_state)
     await update.message.reply_text(
         "🧭 <b>Какую тему подобрать для следующего урока?</b>\n\n"
@@ -459,6 +510,7 @@ async def start_lesson_with_requested_topic(
     requested_topic: str | None,
 ) -> None:
     user_state["requested_topic"] = requested_topic or None
+    user_state["awaiting_rules_text"] = False
     storage.update_user(update.effective_user.id, user_state)
     await start_next_lesson(update, user_state)
 
@@ -512,6 +564,13 @@ def evaluate_quiz_answer(question: dict[str, Any], user_answer: str) -> dict[str
     }
 
 
+async def analyze_rules_text(text: str) -> dict[str, Any]:
+    review = await ai_tutor.explain_sentence(text) if ai_tutor.available else None
+    if review:
+        return review
+    return analyze_text_locally(text)
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     storage.ensure_user(user.id, user.first_name)
@@ -535,7 +594,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             "📈 <b>Как мы будем учиться</b>\n"
             "Урок → упражнения по теме → разбор ошибок → выбор следующего шага.\n\n"
             "✨ Напиши <code>/lesson</code>, и я спрошу тему.\n"
-            "Или сразу: <code>/lesson путешествия</code>."
+            "Или сразу: <code>/lesson путешествия</code>.\n"
+            "Если хочешь разобрать свою фразу, используй <code>/rules</code>."
         ),
         reply_markup=MENU,
     )
@@ -545,10 +605,49 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await update.message.reply_text(format_help(), reply_markup=MENU)
 
 
+async def rules_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    storage.ensure_user(user_id, update.effective_user.first_name)
+    user_state = storage.get_user(user_id)
+    raw_text = " ".join(context.args).strip()
+
+    if user_state.get("active_session"):
+        await update.message.reply_text(
+            "⏳ <b>Сначала закончим текущие упражнения</b>\n"
+            "После этого я с радостью разберу любую твою фразу через <code>/rules</code>.",
+            reply_markup=MENU,
+        )
+        return
+
+    if not raw_text:
+        user_state["awaiting_lesson_topic"] = False
+        user_state["awaiting_rules_text"] = True
+        storage.update_user(user_id, user_state)
+        await update.message.reply_text(
+            "🧩 <b>Режим разбора правил включен</b>\n\n"
+            "Пришли одним сообщением английский вопрос или предложение.\n"
+            "Например:\n"
+            "• <i>She don't like coffee</i>\n"
+            "• <i>Where you live</i>\n"
+            "• <i>I am go to work tomorrow</i>\n\n"
+            "Я покажу более естественный вариант, отмечу ошибки и коротко объясню правило.\n\n"
+            "Чтобы отменить, напиши <code>отмена</code>.",
+            reply_markup=free_text_markup(),
+        )
+        return
+
+    user_state["awaiting_lesson_topic"] = False
+    user_state["awaiting_rules_text"] = False
+    storage.update_user(user_id, user_state)
+    review = await analyze_rules_text(raw_text)
+    await update.message.reply_text(format_rules_review(review), reply_markup=MENU)
+
+
 async def lesson(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     storage.ensure_user(user_id, update.effective_user.first_name)
     user_state = storage.get_user(user_id)
+    user_state["awaiting_rules_text"] = False
     raw_topic = parse_lesson_args(context)
     if raw_topic:
         await start_lesson_with_requested_topic(update, user_state, raw_topic)
@@ -560,6 +659,7 @@ async def topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user_id = update.effective_user.id
     storage.ensure_user(user_id, update.effective_user.first_name)
     user_state = storage.get_user(user_id)
+    user_state["awaiting_rules_text"] = False
 
     raw_topic = " ".join(context.args).strip()
     if not raw_topic:
@@ -574,6 +674,7 @@ async def topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     if normalize(raw_topic) in {"авто", "сам", "random", "auto"}:
         user_state["requested_topic"] = None
         user_state["awaiting_lesson_topic"] = False
+        user_state["awaiting_rules_text"] = False
         storage.update_user(user_id, user_state)
         await update.message.reply_text(
             "🎲 <b>Окей, тему снова выбираю сам</b>\nСледующий урок будет без фиксированного запроса.",
@@ -583,6 +684,7 @@ async def topic_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
     user_state["requested_topic"] = raw_topic
     user_state["awaiting_lesson_topic"] = False
+    user_state["awaiting_rules_text"] = False
     storage.update_user(user_id, user_state)
     await update.message.reply_text(
         f"📝 <b>Тему запомнил</b>\nСледующий урок будет про <b>{esc(raw_topic)}</b>.",
@@ -615,6 +717,7 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     available_words = get_words_for_quiz(user_state)
     session = build_quiz_session(available_words)
+    user_state["awaiting_rules_text"] = False
     user_state["active_session"] = session
     storage.update_user(user_id, user_state)
 
@@ -716,6 +819,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
 
     if not session:
+        if user_state.get("awaiting_rules_text"):
+            if normalize(text) in {
+                normalize(CANCEL_TOPIC_TEXT),
+                "отмена",
+                "cancel",
+            }:
+                user_state["awaiting_rules_text"] = False
+                storage.update_user(user_id, user_state)
+                await update.message.reply_text(
+                    "👌 <b>Режим разбора выключен</b>\nКогда захочешь проверить новую фразу, снова используй <code>/rules</code>.",
+                    reply_markup=MENU,
+                )
+                return
+
+            user_state["awaiting_rules_text"] = False
+            storage.update_user(user_id, user_state)
+            review = await analyze_rules_text(text)
+            await update.message.reply_text(format_rules_review(review), reply_markup=MENU)
+            return
+
         if user_state.get("awaiting_lesson_topic"):
             if normalize(text) in {
                 normalize(AUTO_TOPIC_TEXT),
@@ -778,7 +901,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(
             "✨ <b>Готов продолжать</b>\n"
             "Начни с <code>/lesson</code>, запусти <code>/quiz</code>, "
-            "или напиши, на какую тему тебе хочется урок.",
+            "напиши, на какую тему тебе хочется урок, "
+            "или используй <code>/rules</code> для разбора своей фразы.",
             reply_markup=MENU,
         )
         return
@@ -882,6 +1006,7 @@ def run() -> None:
     )
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(CommandHandler("rules", rules_command))
     application.add_handler(CommandHandler("lesson", lesson))
     application.add_handler(CommandHandler("topic", topic_command))
     application.add_handler(CommandHandler("words", words))
